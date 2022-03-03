@@ -1,18 +1,21 @@
 package adbs.device;
 
 import adbs.channel.AdbChannelInitializer;
+import adbs.constant.DeviceMode;
 import adbs.constant.DeviceType;
 import adbs.constant.Feature;
 import adbs.entity.sync.SyncDent;
 import adbs.entity.sync.SyncStat;
-import io.netty.channel.*;
-import io.netty.util.AttributeMap;
+import adbs.util.DeviceListener;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelInboundHandler;
+import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.Future;
 
 import java.io.*;
 import java.util.Set;
 
-public interface AdbDevice extends AttributeMap {
+public interface AdbDevice extends AutoCloseable {
 
     int DEFAULT_MODE = 0664;
 
@@ -100,14 +103,6 @@ public interface AdbDevice extends AttributeMap {
      */
     Future remount();
 
-    /**
-     * usb                      restart adbd listening on USB
-     * tcpip PORT               restart adbd listening on TCP on PORT
-     * @param port
-     * @return
-     */
-    Future reload(int port);
-
     Future<String> reverse(String destination, AdbChannelInitializer initializer);
 
     Future<String> reverse(String remote, String local);
@@ -120,8 +115,16 @@ public interface AdbDevice extends AttributeMap {
 
     ChannelFuture forward(String destination, int port);
 
-    void setAutoReconnect(boolean autoReconnect);
+    Future reboot(DeviceMode mode) throws Exception;
 
-    void close();
+    default Future reboot() throws Exception {
+        return reboot(DeviceMode.SYSTEM);
+    }
+
+    Future reconnect();
+
+    void addListener(DeviceListener listener);
+
+    void removeListener(DeviceListener listener);
 
 }

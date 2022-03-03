@@ -4,14 +4,9 @@ import adbs.device.AdbDevice;
 import adbs.device.SocketAdbDevice;
 import adbs.exception.RemoteException;
 import adbs.util.AuthUtil;
-import adbs.util.SimpleHttpClient;
+import adbs.util.DeviceListener;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.LoggerContext;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.SimpleChannelInboundHandler;
-import io.netty.handler.codec.http.*;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,7 +14,6 @@ import org.slf4j.LoggerFactory;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.security.interfaces.RSAPrivateCrtKey;
-import java.util.concurrent.TimeUnit;
 
 public class TestAdbDevice {
 
@@ -59,22 +53,27 @@ public class TestAdbDevice {
     }
 
     public static void main(String[] args) throws Exception {
-        LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
-        loggerContext.getLogger("root").setLevel(Level.DEBUG);
-        AdbDevice device = new SocketAdbDevice("192.168.137.87", 5555, privateKey, publicKey);
-        device.setAutoReconnect(true);
-        SimpleHttpClient httpClient = new SimpleHttpClient(device, 9002, 50000);
-        while (true) {
-            try {
-                SimpleHttpClient.SimpleHttpResponse response = httpClient.get("/test");
-                System.out.println(response.status());
-            } catch (Exception e) {
-                try {
-                    httpClient = new SimpleHttpClient(device, 9002, 50000);
-                } catch (Exception e1) {
-                    e1.printStackTrace();
-                }
+//        LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+//        loggerContext.getLogger("root").setLevel(Level.DEBUG);
+        AdbDevice device = new SocketAdbDevice("127.0.0.1", 6039, privateKey, publicKey);
+        DeviceListener handler = new DeviceListener() {
+            @Override
+            public void onConnected(AdbDevice device) {
+                device.shell("echo", "test").addListener(f -> {
+                    System.out.println(f.getNow());
+                });
             }
-        }
+
+            @Override
+            public void onDisconnected(AdbDevice device) {
+                logger.info("[{}] try reconnect", device.serial());
+                device.reconnect().addListener(f -> {
+                    if (!f.isSuccess()) {
+                        onDisconnected(device);
+                    }
+                });
+            }
+        };
+        device.addListener(handler);
     }
 }

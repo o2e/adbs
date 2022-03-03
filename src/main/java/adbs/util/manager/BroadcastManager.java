@@ -4,8 +4,6 @@ import adbs.device.AdbDevice;
 import adbs.exception.RemoteException;
 import org.apache.commons.lang3.StringUtils;
 
-import java.io.IOException;
-
 public class BroadcastManager {
 
     private final AdbDevice device;
@@ -17,18 +15,19 @@ public class BroadcastManager {
         this.shell = new ShellManager(device);
     }
 
-    public void broadcast(String action, String data) throws IOException {
-        String result = shell.shell("am", "broadcast", "-a", action, "-d", data);
-        result = StringUtils.trim(result);
-        if (result.indexOf("Broadcast completed") == -1) {
-            throw new RemoteException(result);
-        }
+    public void broadcast(String action, String data) throws Exception {
+        broadcast(action, "-d", data);
     }
 
-    public void broadcast(String action) throws IOException {
-        String result = shell.shell("am", "broadcast", "-a", action);
+    public void broadcast(String action, String... args) throws Exception {
+        String[] buildArgs = new String[args.length + 3];
+        buildArgs[0] = "broadcast";
+        buildArgs[1] = "-a";
+        buildArgs[2] = action;
+        System.arraycopy(args, 0, buildArgs, 3, args.length);
+        String result = shell.shell("am", buildArgs);
         result = StringUtils.trim(result);
-        if (result.indexOf("Broadcast completed") == -1) {
+        if (!result.contains("Broadcast completed")) {
             throw new RemoteException(result);
         }
     }

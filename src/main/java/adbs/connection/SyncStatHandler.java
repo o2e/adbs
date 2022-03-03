@@ -3,7 +3,6 @@ package adbs.connection;
 import adbs.constant.Feature;
 import adbs.constant.SyncID;
 import adbs.device.AdbDevice;
-import adbs.entity.sync.SyncDent;
 import adbs.entity.sync.SyncFail;
 import adbs.entity.sync.SyncPath;
 import adbs.entity.sync.SyncStat;

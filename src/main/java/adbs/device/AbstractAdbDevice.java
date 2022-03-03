@@ -6,6 +6,7 @@ import adbs.channel.AdbChannelInitializer;
 import adbs.channel.TCPReverse;
 import adbs.codec.*;
 import adbs.connection.*;
+import adbs.constant.DeviceMode;
 import adbs.constant.DeviceType;
 import adbs.constant.Feature;
 import adbs.entity.DeviceInfo;
@@ -16,6 +17,7 @@ import adbs.entity.sync.SyncStat;
 import adbs.exception.RemoteException;
 import adbs.util.ChannelFactory;
 import adbs.util.ChannelUtil;
+import adbs.util.DeviceListener;
 import adbs.util.ShellUtil;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.PooledByteBufAllocator;
@@ -25,9 +27,6 @@ import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.LineBasedFrameDecoder;
 import io.netty.handler.codec.string.StringDecoder;
 import io.netty.handler.codec.string.StringEncoder;
-import io.netty.util.DefaultAttributeMap;
-import io.netty.util.ReferenceCountUtil;
-import io.netty.util.ReferenceCounted;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.Promise;
 import org.apache.commons.lang3.ArrayUtils;
@@ -37,7 +36,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.nio.channels.ClosedChannelException;
 import java.nio.charset.StandardCharsets;
 import java.security.interfaces.RSAPrivateCrtKey;
 import java.util.LinkedList;
@@ -51,7 +49,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @SuppressWarnings({"rawtypes", "unchecked"})
-public abstract class AbstractAdbDevice extends DefaultAttributeMap implements AdbDevice {
+public abstract class AbstractAdbDevice implements AdbDevice {
 
     private static final Logger logger = LoggerFactory.getLogger(AbstractAdbDevice.class);
 
@@ -69,15 +67,13 @@ public abstract class AbstractAdbDevice extends DefaultAttributeMap implements A
 
     private final Set<Channel> forwards;
 
-    private volatile boolean autoReconnect;
-
-    private volatile ChannelFuture connectFuture;
+    private volatile Set<DeviceListener> listeners;
 
     private volatile Channel channel;
 
     private volatile DeviceInfo deviceInfo;
 
-    protected AbstractAdbDevice(String serial, RSAPrivateCrtKey privateKey, byte[] publicKey, ChannelFactory factory) {
+    protected AbstractAdbDevice(String serial, RSAPrivateCrtKey privateKey, byte[] publicKey, ChannelFactory factory) throws Exception {
         this.serial = serial;
         this.privateKey = privateKey;
         this.publicKey = publicKey;
@@ -85,37 +81,35 @@ public abstract class AbstractAdbDevice extends DefaultAttributeMap implements A
         this.channelIdGen = new AtomicInteger(1);
         this.reverseMap = new ConcurrentHashMap<>();
         this.forwards = ConcurrentHashMap.newKeySet();
-        this.autoReconnect = false;
-        this.initConnection();
+        this.listeners = ConcurrentHashMap.newKeySet();
+        this.newConnection().get(30, TimeUnit.SECONDS);
     }
 
-    private void initConnection() {
-        ConnectHandler connectHandler = new ConnectHandler();
+    private ChannelFuture newConnection() {
         ChannelFuture future = factory.newChannel(new ChannelInitializer<Channel>() {
             @Override
             protected void initChannel(Channel ch) throws Exception {
                 ChannelPipeline pipeline = ch.pipeline();
-                pipeline.addLast("reconnect", new AutoReconnectHandler())
+                pipeline.addLast(new ChannelInboundHandlerAdapter(){
+                            @Override
+                            public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+                                try {
+                                    logger.info("[{}] device disconnected", serial());
+                                    listeners.forEach(listener -> listener.onDisconnected(AbstractAdbDevice.this));
+                                } catch (Exception e) {
+                                    logger.info("[{}] call disconnect handler failed, error={}", serial(), e.getMessage(), e);
+                                } finally {
+                                    super.channelInactive(ctx);
+                                }
+                            }
+                        })
                         .addLast("codec", new AdbPacketCodec())
                         .addLast("auth", new AdbAuthHandler(privateKey, publicKey))
-                        .addLast("connect", connectHandler);
+                        .addLast("connect", new ConnectHandler());
             }
         });
-        future.addListener(f -> {
-            if (f.cause() != null) {
-                connectHandler.connectFailed(f.cause());
-                if (autoReconnect) {
-                    logger.error("[{}] connect failed, try reconnect, error={}", serial(), f.cause().getMessage(), f.cause());
-                    initConnection();
-                } else {
-                    logger.error("[{}] connect failed, error={}", serial(), f.cause().getMessage(), f.cause());
-                }
-            } else {
-                logger.info("[{}] connect success", serial());
-            }
-        });
-        this.connectFuture = future;
         this.channel = future.channel();
+        return future;
     }
 
     protected ChannelFactory factory() {
@@ -171,7 +165,9 @@ public abstract class AbstractAdbDevice extends DefaultAttributeMap implements A
         String channelName = ChannelUtil.getChannelName(localId);
         AdbChannel adbChannel = new AdbChannel(channel, localId, 0);
         adbChannel.config().setConnectTimeoutMillis(timeoutMs);
-        initializer.initChannel(adbChannel);
+        if (initializer != null) {
+            initializer.initChannel(adbChannel);
+        }
         channel.pipeline().addLast(channelName, adbChannel);
         return adbChannel.connect(new AdbChannelAddress(destination, localId));
     }
@@ -301,27 +297,22 @@ public abstract class AbstractAdbDevice extends DefaultAttributeMap implements A
         return promise;
     }
 
-
     @Override
     public Future root() {
         Promise promise = eventLoop().newPromise();
+        RestartHandler handler = new RestartHandler(promise);
+        addListener(handler);
         exec("root:\0").addListener((Future<String> f) -> {
                     if (f.cause() != null) {
                         promise.tryFailure(f.cause());
                     } else {
                         String s = StringUtils.trim(f.getNow());
                         if (s.equals("adbd is already running as root")) {
+                            removeListener(handler);
                             promise.trySuccess(null);
-                        } else {
-                            initConnection();
-                            ChannelFuture future = this.connectFuture;
-                            future.addListener(f1 -> {
-                                if (f1.cause() != null) {
-                                    promise.tryFailure(f1.cause());
-                                } else {
-                                    promise.trySuccess(null);
-                                }
-                            });
+                        } else if (s.startsWith("adbd cannot run as root")) {
+                            removeListener(handler);
+                            promise.tryFailure(new RemoteException(s));
                         }
                     }
                 });
@@ -331,23 +322,16 @@ public abstract class AbstractAdbDevice extends DefaultAttributeMap implements A
     @Override
     public Future unroot() {
         Promise promise = eventLoop().newPromise();
+        RestartHandler handler = new RestartHandler(promise);
+        addListener(handler);
         exec("unroot:\0").addListener((Future<String> f) -> {
                     if (f.cause() != null) {
                         promise.tryFailure(f.cause());
                     } else {
                         String s = StringUtils.trim(f.getNow());
                         if (s.equals("adbd not running as root")) {
+                            removeListener(handler);
                             promise.trySuccess(null);
-                        } else {
-                            initConnection();
-                            ChannelFuture future = this.connectFuture;
-                            future.addListener(f1 -> {
-                                if (f1.cause() != null) {
-                                    promise.tryFailure(f1.cause());
-                                } else {
-                                    promise.trySuccess(null);
-                                }
-                            });
                         }
                     }
                 });
@@ -357,7 +341,7 @@ public abstract class AbstractAdbDevice extends DefaultAttributeMap implements A
     @Override
     public Future remount() {
         Promise promise = eventLoop().newPromise();
-        exec("unroot:\0").addListener((Future<String> f) -> {
+        exec("remount:\0").addListener((Future<String> f) -> {
                     if (f.cause() != null) {
                         promise.tryFailure(f.cause());
                     } else {
@@ -565,13 +549,34 @@ public abstract class AbstractAdbDevice extends DefaultAttributeMap implements A
     }
 
     @Override
-    public void setAutoReconnect(boolean autoReconnect) {
-        this.autoReconnect = autoReconnect;
+    public Future reboot(DeviceMode mode) throws Exception {
+        if (mode == null) {
+            throw new IllegalArgumentException("argument `mode` is null");
+        }
+        return open("reboot:" + mode.getName() + "\0", null);
     }
 
     @Override
-    public void close() {
-        setAutoReconnect(false);
+    public Future reconnect() {
+        Channel channel = this.channel;
+        if (channel.isOpen() || channel.isActive()) {
+            throw new IllegalStateException("channel is open or active");
+        }
+        return newConnection();
+    }
+
+    @Override
+    public void addListener(DeviceListener listener) {
+        this.listeners.add(listener);
+    }
+
+    @Override
+    public void removeListener(DeviceListener listener) {
+        this.listeners.remove(listener);
+    }
+
+    @Override
+    public void close() throws Exception {
         try {
             //关闭reverse
             reverseRemoveAll().get(30, TimeUnit.SECONDS);
@@ -586,11 +591,7 @@ public abstract class AbstractAdbDevice extends DefaultAttributeMap implements A
                 logger.error("[{}] remove forward failed, channel={}", serial(), forward, e);
             }
         }
-        try {
-            channel.close().get(30, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            throw new RuntimeException("disconnect failed", e);
-        }
+        channel.close().get(30, TimeUnit.SECONDS);
     }
 
     @Override
@@ -598,36 +599,30 @@ public abstract class AbstractAdbDevice extends DefaultAttributeMap implements A
         return serial;
     }
 
-    private class AutoReconnectHandler extends ChannelInboundHandlerAdapter {
+    private class RestartHandler extends DeviceListener {
+
+        private final Promise promise;
+
+        public RestartHandler(Promise promise) {
+            this.promise = promise;
+        }
 
         @Override
-        public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-            if (autoReconnect) {
-                logger.error("[{}] connection disconnected, try reconnect", serial());
-                initConnection();
-            } else {
-                logger.info("[{}] connection disconnected", serial());
-            }
-            super.channelInactive(ctx);
+        public void onDisconnected(AdbDevice device) {
+            removeListener(this);
+            newConnection().addListener(f1 -> {
+                if (f1.cause() != null) {
+                    promise.tryFailure(f1.cause());
+                } else {
+                    promise.trySuccess(null);
+                }
+            });
         }
     }
 
     private class ConnectHandler extends ChannelDuplexHandler {
 
         private final Queue<PendingWriteEntry> pendingWriteEntries = new LinkedList<>();
-
-        private void connectFailed(Throwable cause) {
-            while (true) {
-                PendingWriteEntry entry = pendingWriteEntries.poll();
-                if (entry == null) {
-                    break;
-                }
-                entry.promise.tryFailure(cause);
-                if (entry.msg instanceof ReferenceCounted && ((ReferenceCounted) entry.msg).refCnt() > 0) {
-                    ReferenceCountUtil.safeRelease(entry.msg);
-                }
-            }
-        }
 
         @Override
         public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
@@ -650,6 +645,8 @@ public abstract class AbstractAdbDevice extends DefaultAttributeMap implements A
                     });
                 }
                 ctx.channel().flush();
+                logger.info("[{}] device connected", serial());
+                listeners.forEach(listener -> listener.onConnected(AbstractAdbDevice.this));
             } else {
                 super.channelRead(ctx, msg);
             }

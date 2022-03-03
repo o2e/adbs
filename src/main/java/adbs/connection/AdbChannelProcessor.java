@@ -36,7 +36,6 @@ public class AdbChannelProcessor extends ChannelInboundHandlerAdapter {
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
         logger.error("Uncaught exception: {}", cause.getMessage(), cause);
-        ctx.fireExceptionCaught(cause);
     }
 
     private boolean fireChannelMessage(ChannelHandlerContext ctx, AdbPacket message) throws Exception {

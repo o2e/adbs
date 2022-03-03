@@ -2,10 +2,10 @@ package adbs.util.manager;
 
 import adbs.device.AdbDevice;
 import adbs.exception.RemoteException;
+import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.File;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -13,8 +13,6 @@ import java.util.List;
 public class PackageManager {
 
     private static final String SUCCESS = "Success";
-
-    private static final String FAILURE = "Failure";
 
     private final AdbDevice device;
 
@@ -36,8 +34,14 @@ public class PackageManager {
         return expandArgs;
     }
 
-    public List<String> list() {
-        String result = shell.shell("pm", "list", "packages");
+    public List<String> list(Integer userId) throws Exception {
+        String[] args;
+        if (userId == null) {
+            args = new String[]{"list", "packages"};
+        } else {
+            args = new String[]{"list", "packages", "--user", String.valueOf(userId)};
+        }
+        String result = shell.shell("pm", args);
         List<String> packages = new ArrayList<>();
         for(String pkg : result.split("\r|\n")) {
             pkg = StringUtils.trim(pkg);
@@ -49,9 +53,24 @@ public class PackageManager {
         return packages;
     }
 
-    public void install(File apk, String... args) throws IOException {
+    public List<String> list() throws Exception {
+        return list(null);
+    }
+
+    public void install(File apk, Integer userId, String... args) throws Exception {
         String remote = "/data/local/tmp/" + apk.getName();
         fm.push(apk, remote);
+        install(remote, userId, args);
+    }
+
+    public void install(File apk, String... args) throws Exception {
+        install(apk, null, args);
+    }
+
+    public void install(String remote, Integer userId, String... args) throws Exception {
+        if (userId != null) {
+            args = ArrayUtils.addAll(args, "--user", String.valueOf(userId), "-r");
+        }
         String result = shell.shell("pm", expandArgs("install", remote, args));
         result = StringUtils.trim(result);
         fm.delete(remote);
@@ -60,7 +79,14 @@ public class PackageManager {
         }
     }
 
-    public void uninstall(String pkg, String... args) throws IOException {
+    public void install(String remote, String... args) throws Exception {
+        install(remote, null, args);
+    }
+
+    public void uninstall(String pkg, Integer userId, String... args) throws Exception {
+        if (userId != null) {
+            args = ArrayUtils.addAll(args, "--user", String.valueOf(userId));
+        }
         String result = shell.shell("pm", expandArgs("uninstall", pkg, args));
         result = StringUtils.trim(result);
         if (!result.startsWith(SUCCESS)) {
@@ -68,7 +94,11 @@ public class PackageManager {
         }
     }
 
-    public void launch(String pkg) throws IOException {
+    public void uninstall(String pkg, String... args) throws Exception {
+        uninstall(pkg, null, args);
+    }
+
+    public void launch(String pkg) throws Exception {
         String result = shell.shell("monkey", "-p", pkg, "-c", "android.intent.category.LAUNCHER", "1");
         result = StringUtils.trim(result);
         if (result.contains("elapsed time")) {
@@ -76,11 +106,15 @@ public class PackageManager {
         }
     }
 
-    public void launch(String pkg, String activity) throws IOException {
+    public void launch(String pkg, String activity) throws Exception {
         launch(pkg, activity, null);
     }
 
-    public void launch(String pkg, String activity, String data, String... args) throws IOException {
+    public void launch(String pkg, String activity, Integer userId) throws Exception {
+        launch(pkg, activity, null, userId);
+    }
+
+    public void launch(String pkg, String activity, String data, Integer userId, String... args) throws Exception {
         List<String> argList = new ArrayList<>();
         argList.add("start");
         argList.add("-n");
@@ -88,6 +122,10 @@ public class PackageManager {
         if (data != null) {
             argList.add("-d");
             argList.add(data);
+        }
+        if (userId != null) {
+            argList.add("--user");
+            argList.add(String.valueOf(userId));
         }
         Collections.addAll(argList, args);
         String[] fullArgs = new String[argList.size()];
@@ -99,11 +137,39 @@ public class PackageManager {
         }
     }
 
-    public void stop(String pkg) throws IOException {
-        String result = shell.shell("am", "force-stop", pkg);
+    public void clear(String pkg, Integer userId) throws Exception {
+        String[] args;
+        if (userId == null) {
+            args = new String[]{"clear", pkg};
+        } else {
+            args = new String[]{"clear", "--user", String.valueOf(userId), pkg};
+        }
+        String result = shell.shell("am", args);
+        result = StringUtils.trim(result);
+        if (!SUCCESS.equals(result)) {
+            throw new RemoteException(result);
+        }
+    }
+
+    public void clear(String pkg) throws Exception {
+        clear(pkg, null);
+    }
+
+    public void stop(String pkg, Integer userId) throws Exception {
+        String[] args;
+        if (userId == null) {
+            args = new String[]{"force-stop", pkg};
+        } else {
+            args = new String[]{"force-stop", "--user", String.valueOf(userId), pkg};
+        }
+        String result = shell.shell("am", args);
         result = StringUtils.trim(result);
         if (StringUtils.isNotEmpty(result)) {
             throw new RemoteException(result);
         }
+    }
+
+    public void stop(String pkg) throws Exception {
+        stop(pkg, null);
     }
 }

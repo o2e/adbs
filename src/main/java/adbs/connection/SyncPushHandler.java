@@ -12,7 +12,6 @@ import io.netty.util.ReferenceCountUtil;
 import io.netty.util.concurrent.Promise;
 
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.ProtocolException;
 import java.nio.channels.ClosedChannelException;
 

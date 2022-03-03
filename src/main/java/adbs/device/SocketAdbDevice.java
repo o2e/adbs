@@ -5,14 +5,11 @@ import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
-import io.netty.util.concurrent.Future;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.security.interfaces.RSAPrivateCrtKey;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 @SuppressWarnings({"rawtypes", "unchecked"})
 public class SocketAdbDevice extends AbstractAdbDevice {
@@ -23,7 +20,7 @@ public class SocketAdbDevice extends AbstractAdbDevice {
 
     private final Integer port;
 
-    public SocketAdbDevice(String host, Integer port, RSAPrivateCrtKey privateKey, byte[] publicKey) {
+    public SocketAdbDevice(String host, Integer port, RSAPrivateCrtKey privateKey, byte[] publicKey) throws Exception {
         super(host + ":" + port, privateKey, publicKey, new SocketChannelFactory(host, port));
         this.host = host;
         this.port = port;
@@ -38,12 +35,7 @@ public class SocketAdbDevice extends AbstractAdbDevice {
     }
 
     @Override
-    public Future reload(int port) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public void close() {
+    public void close() throws Exception {
         try {
             super.close();
         } finally {

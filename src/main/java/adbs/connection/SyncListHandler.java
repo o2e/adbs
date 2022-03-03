@@ -6,7 +6,6 @@ import adbs.device.AdbDevice;
 import adbs.entity.sync.SyncDent;
 import adbs.entity.sync.SyncFail;
 import adbs.entity.sync.SyncPath;
-import adbs.entity.sync.SyncStat;
 import adbs.exception.RemoteException;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
