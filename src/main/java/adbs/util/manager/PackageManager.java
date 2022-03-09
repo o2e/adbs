@@ -57,6 +57,22 @@ public class PackageManager {
         return list(null);
     }
 
+    public String path(String pkg, Integer userId) throws Exception {
+        String[] args;
+        if (userId == null) {
+            args = new String[]{"path", pkg};
+        } else {
+            args = new String[]{"path", "--user", String.valueOf(userId), pkg};
+        }
+        args = ArrayUtils.addAll(args, "|", "sed", "-e", "s/^package://");
+        String result = shell.shell("pm", args);
+        return StringUtils.trim(result);
+    }
+
+    public String path(String pkg) throws Exception {
+        return path(pkg, null);
+    }
+
     public void install(File apk, Integer userId, String... args) throws Exception {
         String remote = "/data/local/tmp/" + apk.getName();
         fm.push(apk, remote);
@@ -135,6 +151,25 @@ public class PackageManager {
         if (result.contains("Error type")) {
             throw new RemoteException(result);
         }
+    }
+
+    public void launch(Integer userId, String... args) throws Exception {
+        String[] allArgs;
+        if (userId == null) {
+            allArgs = new String[]{"start"};
+        } else {
+            allArgs = new String[]{"start", "--user", String.valueOf(userId)};
+        }
+        allArgs = ArrayUtils.addAll(allArgs, args);
+        String result = shell.shell("am", allArgs);
+        result = StringUtils.trim(result);
+        if (result.contains("Error type")) {
+            throw new RemoteException(result);
+        }
+    }
+
+    public void launch(String... args) throws Exception {
+        launch(null, args);
     }
 
     public void clear(String pkg, Integer userId) throws Exception {

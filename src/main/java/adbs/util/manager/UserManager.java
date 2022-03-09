@@ -14,7 +14,7 @@ public class UserManager {
 
     private static final Pattern USER_INFO_PATTERN = Pattern.compile("^UserInfo\\{(.+):(.+):(.+)\\}(.*)$");
 
-    private static final Pattern CREATE_USER_PATTERN = Pattern.compile("^Success: created user id (.d+)$");
+    private static final Pattern CREATE_USER_PATTERN = Pattern.compile("^Success: created user id (\\d+)$");
 
     private final AdbDevice device;
 

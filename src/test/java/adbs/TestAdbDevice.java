@@ -5,15 +5,23 @@ import adbs.device.SocketAdbDevice;
 import adbs.exception.RemoteException;
 import adbs.util.AuthUtil;
 import adbs.util.DeviceListener;
+import adbs.util.manager.ActivityManager;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.LoggerContext;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.util.concurrent.Promise;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
+import java.net.URI;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.interfaces.RSAPrivateCrtKey;
+import java.util.concurrent.TimeUnit;
 
 public class TestAdbDevice {
 
@@ -53,27 +61,42 @@ public class TestAdbDevice {
     }
 
     public static void main(String[] args) throws Exception {
-//        LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
-//        loggerContext.getLogger("root").setLevel(Level.DEBUG);
-        AdbDevice device = new SocketAdbDevice("127.0.0.1", 6039, privateKey, publicKey);
-        DeviceListener handler = new DeviceListener() {
-            @Override
-            public void onConnected(AdbDevice device) {
-                device.shell("echo", "test").addListener(f -> {
-                    System.out.println(f.getNow());
-                });
-            }
-
-            @Override
-            public void onDisconnected(AdbDevice device) {
-                logger.info("[{}] try reconnect", device.serial());
-                device.reconnect().addListener(f -> {
-                    if (!f.isSuccess()) {
-                        onDisconnected(device);
+        LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+        loggerContext.getLogger("root").setLevel(Level.DEBUG);
+        AdbDevice device = new SocketAdbDevice("192.168.137.95", 5555, privateKey, publicKey);
+//        ActivityManager am = new ActivityManager(device);
+//        String currentActivity = am.getCurrentActivity();
+//        System.out.println(currentActivity);
+        Promise promise = device.eventLoop().newPromise();
+        device.shell(
+                "nohup",
+                new String[] {
+                        "/data/local/v2ray-android/v2ray",
+                        "-c",
+                        "/data/local/v2ray-android/config.json",
+                        ">",
+                        "/data/local/v2ray-android/run.log",
+                        "2>&1",
+                        "&",
+                        "tail",
+                        "-f",
+                        "/data/local/v2ray-android/run.log"
+                },
+                true,
+                new ChannelInboundHandlerAdapter() {
+                    @Override
+                    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+                        String message = (String) msg;
+                        logger.info("[{}] v2ray start, output={}", device.serial(), message);
+                        if (message.contains("V2Ray") && message.contains("started")) {
+                            //出现这个说明启动成功了
+                            promise.trySuccess(null);
+                            ctx.close();
+                        }
                     }
-                });
-            }
-        };
-        device.addListener(handler);
+                }
+        );
+        promise.get(30, TimeUnit.SECONDS);
+        System.out.println("test");
     }
 }

@@ -2,12 +2,14 @@ package adbs.util.manager;
 
 import adbs.device.AdbDevice;
 import adbs.entity.sync.SyncDent;
+import adbs.entity.sync.SyncStat;
 import adbs.exception.RemoteException;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.File;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.concurrent.TimeUnit;
 
 public class FileManager {
 
@@ -72,5 +74,22 @@ public class FileManager {
 
     public void chmod(String path, String mod) throws Exception {
         shell.shell("chmod", mod, path);
+    }
+
+    public SyncStat stat(String path) throws Exception {
+        return device.stat(path).get(30, TimeUnit.SECONDS);
+    }
+
+    public boolean exists(String path) throws Exception {
+        return stat(path).mode != null;
+    }
+
+    public String md5(String file) throws Exception {
+        String ret = shell.shell("md5sum", file);
+        ret = ret.trim();
+        if (!ret.endsWith(file)) {
+            throw new RemoteException(ret);
+        }
+        return ret.substring(0, 32);
     }
 }
