@@ -93,14 +93,15 @@ public abstract class AbstractAdbDevice implements AdbDevice {
                 pipeline.addLast(new ChannelInboundHandlerAdapter(){
                             @Override
                             public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-                                try {
-                                    logger.info("[{}] device disconnected", serial());
-                                    listeners.forEach(listener -> listener.onDisconnected(AbstractAdbDevice.this));
-                                } catch (Exception e) {
-                                    logger.info("[{}] call disconnect handler failed, error={}", serial(), e.getMessage(), e);
-                                } finally {
-                                    super.channelInactive(ctx);
-                                }
+                                logger.info("[{}] device disconnected", serial());
+                                listeners.forEach(listener -> {
+                                    try {
+                                        listener.onDisconnected(AbstractAdbDevice.this);
+                                    } catch (Exception e) {
+                                        logger.info("[{}] call disconnect handler failed, error={}", serial(), e.getMessage(), e);
+                                    }
+                                });
+                                super.channelInactive(ctx);
                             }
                         })
                         .addLast("codec", new AdbPacketCodec())
@@ -646,7 +647,13 @@ public abstract class AbstractAdbDevice implements AdbDevice {
                 }
                 ctx.channel().flush();
                 logger.info("[{}] device connected", serial());
-                listeners.forEach(listener -> listener.onConnected(AbstractAdbDevice.this));
+                listeners.forEach(listener -> {
+                    try {
+                        listener.onConnected(AbstractAdbDevice.this);
+                    } catch (Exception e) {
+                        logger.info("[{}] call disconnect handler failed, error={}", serial(), e.getMessage(), e);
+                    }
+                });
             } else {
                 super.channelRead(ctx, msg);
             }
