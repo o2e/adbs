@@ -15,7 +15,7 @@ import io.netty.util.concurrent.Future;
 import java.io.*;
 import java.util.Set;
 
-public interface AdbDevice extends AutoCloseable {
+public interface AdbDevice {
 
     int DEFAULT_MODE = 0664;
 
@@ -126,5 +126,7 @@ public interface AdbDevice extends AutoCloseable {
     void addListener(DeviceListener listener);
 
     void removeListener(DeviceListener listener);
+
+    void close() throws Exception;
 
 }
